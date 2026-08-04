@@ -9,6 +9,10 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Added
+
+- Adopted the `storage` criterion benchmark (file validation, metadata, local storage, uploaded-file handling) from the root package's `benches/`. Run it with `cargo bench -p armature-storage --bench storage`. The crate now sets `autobenches = false`, so a new file under `benches/` needs an explicit `[[bench]]` entry.
+
 ### Fixed
 
 - The fully-buffered API's size ceiling is documented: every object is materialized in memory in both directions, and single-request `PutObject` caps S3 objects at 5 GiB.
