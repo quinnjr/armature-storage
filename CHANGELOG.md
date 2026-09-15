@@ -9,20 +9,16 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-15
+
 ### Changed
 
+- **Breaking:** `AzureBlobStorage::from_azure_services` takes `armature_azure::AzureServices`, so the `armature-azure` 0.3 requirement is breaking here and the minor moves.
+- **Breaking:** requires `armature-azure` 0.3 (was `0.2`); its types appear in this crate's API, so the requirement change is breaking here and the minor moves. Part of the `armature-core` 0.10 release train.
 - Bumped dependencies: `tokio` 1.53, `http` 1.5, `uuid` 1.26, `azure_storage_blob`/`azure_core` 1.1, `google-cloud-storage` 1.18, `google-cloud-gax` 1.14, `google-cloud-auth` 1.16, `base64` 0.23. No source changes were needed -- the existing S3/GCS/Azure backends already targeted the current API surface of each SDK. `aws-sdk-s3` is held at 1.146 (one release back): newer `aws-sdk-*` releases require `aws-smithy-types` 1.7, whose reshaped `Document::Object` does not compile against the `aws-smithy-json` 0.63 that the newest `aws-config` (1.12) still depends on.
 - A direct `aws-smithy-types >=1.6.3, <1.7` requirement keeps a fresh resolve on the SDK releases held back above; without it the resolver picks `aws-sdk-*`/`aws-runtime` releases that need `aws-smithy-types` 1.7 and fail to build against `aws-config` 1.12.
 - AWS SDK dependencies no longer enable their default features, dropping the SDK's legacy hyper-0.14 client and its `h2 0.3` (RUSTSEC-2026-0258); the hyper-1 `default-https-client` and `rt-tokio` (plus `sigv4a`/`http-1x` where the SDK enabled them by default) are kept.
 - The MSRV CI job also checks `--all-features`, so the optional AWS SDK dependencies are built on the MSRV toolchain.
-
-### Added
-
-- Adopted the `storage` criterion benchmark (file validation, metadata, local storage, uploaded-file handling) from the root package's `benches/`. Run it with `cargo bench -p armature-storage --bench storage`. The crate now sets `autobenches = false`, so a new file under `benches/` needs an explicit `[[bench]]` entry.
-
-### Fixed
-
-- The fully-buffered API's size ceiling is documented: every object is materialized in memory in both directions, and single-request `PutObject` caps S3 objects at 5 GiB.
 
 ## [0.2.2] - 2026-08-04
 
