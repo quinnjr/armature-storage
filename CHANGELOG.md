@@ -9,6 +9,10 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped dependencies: `tokio` 1.53, `http` 1.5, `uuid` 1.26, `azure_storage_blob`/`azure_core` 1.1, `google-cloud-storage` 1.18, `google-cloud-gax` 1.14, `google-cloud-auth` 1.16, `base64` 0.23. No source changes were needed -- the existing S3/GCS/Azure backends already targeted the current API surface of each SDK. `aws-sdk-s3` is held at 1.146 (one release back): newer `aws-sdk-*` releases require `aws-smithy-types` 1.7, whose reshaped `Document::Object` does not compile against the `aws-smithy-json` 0.63 that the newest `aws-config` (1.12) still depends on.
+
 ### Added
 
 - Adopted the `storage` criterion benchmark (file validation, metadata, local storage, uploaded-file handling) from the root package's `benches/`. Run it with `cargo bench -p armature-storage --bench storage`. The crate now sets `autobenches = false`, so a new file under `benches/` needs an explicit `[[bench]]` entry.
