@@ -48,7 +48,7 @@ hex = "0.4"
 
 # Cloud storage clients (optional features)
 # AWS S3
-aws-sdk-s3 = { version = "1.147", optional = true }
+aws-sdk-s3 = { version = "1.146", optional = true }
 aws-config = { version = "1.12", optional = true }
 
 # Google Cloud Storage
