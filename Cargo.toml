@@ -14,7 +14,7 @@ categories = ["web-programming", "asynchronous"]
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.52", features = ["fs", "io-util", "sync"] }
+tokio = { version = "1.53", features = ["fs", "io-util", "sync"] }
 # `futures-util`/`futures-core` rather than the `futures` facade: the only uses
 # are `TryStreamExt` (azure.rs) and the `Stream` trait (multipart.rs), so the
 # executor/sink/channel crates the facade pulls in are dead weight.
@@ -30,7 +30,7 @@ serde = { version = "1.0", features = ["derive"] }
 
 # HTTP types
 bytes = "1.12"
-http = "1.4"
+http = "1.5"
 mime = "0.3"
 mime_guess = "2.0"
 # Magic-byte content sniffing, so type allowlists check the payload and not
@@ -42,27 +42,27 @@ thiserror = "2.0"
 
 # Utilities
 tracing = "0.1"
-uuid = { version = "1.23", features = ["v4"] }
+uuid = { version = "1.26", features = ["v4"] }
 sha2 = "0.11"
 hex = "0.4"
 
 # Cloud storage clients (optional features)
 # AWS S3
-aws-sdk-s3 = { version = "1.122", optional = true }
-aws-config = { version = "1.8", optional = true }
+aws-sdk-s3 = { version = "1.147", optional = true }
+aws-config = { version = "1.12", optional = true }
 
 # Google Cloud Storage
 armature-gcp = { version = "0.2", optional = true, features = ["storage"] }
-google-cloud-storage = { version = "1.15", optional = true }
-google-cloud-gax = { version = "1.11", optional = true }
-google-cloud-auth = { version = "1.13", optional = true }
+google-cloud-storage = { version = "1.18", optional = true }
+google-cloud-gax = { version = "1.14", optional = true }
+google-cloud-auth = { version = "1.16", optional = true }
 
 # Azure Blob Storage (new Azure SDK: azure_storage_blob 1.0 on azure_core 1.0 + azure_identity 1.0)
 armature-azure = { version = "0.2", optional = true, features = ["blob"] }
-azure_storage_blob = { version = "1.0", optional = true }
-azure_core = { version = "1.0", optional = true }
+azure_storage_blob = { version = "1.1", optional = true }
+azure_core = { version = "1.1", optional = true }
 azure_identity = { version = "1.0", optional = true }
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 # `O_NOFOLLOW` on the final open in the local backend, and `MetadataExt::nlink`
@@ -72,7 +72,7 @@ libc = "0.2"
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 cargo-husky = { version = "1.5", default-features = false, features = ["user-hooks"] }
-tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "test-util"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "test-util"] }
 armature-testkit = { path = "../armature-testkit" }
 # Test-only: every use is behind `#[cfg(test)]`, in a doctest, or in tests/.
 tempfile = "3.27"
