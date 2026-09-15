@@ -12,6 +12,9 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 ### Changed
 
 - Bumped dependencies: `tokio` 1.53, `http` 1.5, `uuid` 1.26, `azure_storage_blob`/`azure_core` 1.1, `google-cloud-storage` 1.18, `google-cloud-gax` 1.14, `google-cloud-auth` 1.16, `base64` 0.23. No source changes were needed -- the existing S3/GCS/Azure backends already targeted the current API surface of each SDK. `aws-sdk-s3` is held at 1.146 (one release back): newer `aws-sdk-*` releases require `aws-smithy-types` 1.7, whose reshaped `Document::Object` does not compile against the `aws-smithy-json` 0.63 that the newest `aws-config` (1.12) still depends on.
+- A direct `aws-smithy-types >=1.6.3, <1.7` requirement keeps a fresh resolve on the SDK releases held back above; without it the resolver picks `aws-sdk-*`/`aws-runtime` releases that need `aws-smithy-types` 1.7 and fail to build against `aws-config` 1.12.
+- AWS SDK dependencies no longer enable their default features, dropping the SDK's legacy hyper-0.14 client and its `h2 0.3` (RUSTSEC-2026-0258); the hyper-1 `default-https-client` and `rt-tokio` (plus `sigv4a`/`http-1x` where the SDK enabled them by default) are kept.
+- The MSRV CI job also checks `--all-features`, so the optional AWS SDK dependencies are built on the MSRV toolchain.
 
 ### Added
 

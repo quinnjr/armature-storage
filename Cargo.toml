@@ -47,9 +47,15 @@ sha2 = "0.11"
 hex = "0.4"
 
 # Cloud storage clients (optional features)
+# SDK default features are off to drop the legacy hyper-0.14 client and its
+# h2 0.3 (RUSTSEC-2026-0258); the hyper-1 `default-https-client` is kept.
 # AWS S3
-aws-sdk-s3 = { version = "1.146", optional = true }
+aws-sdk-s3 = { version = "1.146", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"], optional = true }
 aws-config = { version = "1.12", optional = true }
+# Held below 1.7 so a fresh resolve (Cargo.lock is not committed) picks the
+# aws-sdk-*/aws-runtime releases that still build with aws-config 1.12's
+# aws-smithy-json 0.63. Drop this once aws-config moves to aws-smithy-json 0.64.
+aws-smithy-types = { version = ">=1.6.3, <1.7", optional = true }
 
 # Google Cloud Storage
 armature-gcp = { version = "0.2", optional = true, features = ["storage"] }
@@ -81,7 +87,7 @@ futures = "0.3"
 
 [features]
 default = []
-s3 = ["aws-sdk-s3", "aws-config"]
+s3 = ["aws-smithy-types", "aws-sdk-s3", "aws-config"]
 gcs = ["armature-gcp", "google-cloud-storage", "google-cloud-gax", "google-cloud-auth"]
 azure = ["armature-azure", "azure_storage_blob", "azure_core", "azure_identity", "base64"]
 all-clouds = ["s3", "gcs", "azure"]
