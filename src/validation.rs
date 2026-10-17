@@ -134,13 +134,16 @@ impl ValidationError {
 /// Content-derived facts about a file, computed once per
 /// [`FileValidator::validate`] call and shared by every rule.
 ///
-/// [`sniff_content_type`] scans the payload and, for the SVG probe, allocates a
-/// lossy `String` of the first KiB. Computing it once here and sharing it means
+/// [`sniff_content_type`] scans the payload (magic bytes, then a structural
+/// SVG probe of the first few KiB). Computing it once here and sharing it means
 /// an N-rule validator scans the bytes once, not N times.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationContext {
     /// The MIME type sniffed from the file's magic bytes, if recognizable.
     detected_content_type: Option<String>,
+    /// Whether the validator opted in to SVG via
+    /// [`FileValidator::allow_svg_unsanitized`]. `false` unless set there.
+    svg_allowed: bool,
 }
 
 impl ValidationContext {
@@ -148,7 +151,14 @@ impl ValidationContext {
     pub fn for_file(file: &UploadedFile) -> Self {
         Self {
             detected_content_type: sniff_content_type(file.data()),
+            svg_allowed: false,
         }
+    }
+
+    /// Whether SVG uploads were explicitly opted in to with
+    /// [`FileValidator::allow_svg_unsanitized`].
+    pub fn svg_allowed(&self) -> bool {
+        self.svg_allowed
     }
 
     /// The MIME type sniffed from the file's content, or `None` when its bytes
@@ -188,6 +198,7 @@ pub trait ValidationRule: Send + Sync {
 #[derive(Default)]
 pub struct FileValidator {
     rules: Vec<Box<dyn ValidationRule>>,
+    allow_svg: bool,
 }
 
 impl FileValidator {
@@ -252,19 +263,55 @@ impl FileValidator {
         self.rule(NotEmptyRule)
     }
 
-    /// Only allow images.
+    /// Only allow raster images: JPEG, PNG, GIF and WebP.
     ///
     /// Every accepted image format is recognizable from its content, so this
     /// requires the payload to actually *be* one of them -- a text file
     /// uploaded as `Content-Type: image/png` is rejected.
+    ///
+    /// SVG is **not** accepted: an SVG is an active document that can carry
+    /// `<script>` and event handlers, so serving an uploaded one from your
+    /// origin is stored XSS. Opt in with [`Self::allow_svg_unsanitized`] only
+    /// if you sanitize SVGs yourself or never serve them inline.
     pub fn images_only(self) -> Self {
         self.allowed_types_detected(&[
             "image/jpeg",
             "image/png",
             "image/gif",
             "image/webp",
-            "image/svg+xml",
+            SVG_MIME,
         ])
+    }
+
+    /// Accept SVG uploads (`image/svg+xml`), which every type allowlist
+    /// otherwise rejects -- even `image/*` or an explicit `image/svg+xml`
+    /// entry.
+    ///
+    /// # Danger
+    ///
+    /// SVG is XML that browsers execute: `<script>`, `onload=` handlers,
+    /// `<foreignObject>` HTML and `javascript:` links all run with the
+    /// privileges of the origin that serves the file. This method performs
+    /// **no sanitization**. If you enable it, you must either sanitize every
+    /// SVG before storing it, or serve uploads so they can never execute:
+    ///
+    /// - from a separate, cookieless origin (e.g. a dedicated storage domain);
+    /// - with `Content-Disposition: attachment`;
+    /// - with `Content-Security-Policy: sandbox` (and
+    ///   `X-Content-Type-Options: nosniff`).
+    ///
+    /// The same serving headers are recommended for *every* user upload.
+    ///
+    /// ```
+    /// use armature_storage::FileValidator;
+    ///
+    /// // Raster images plus (unsanitized!) SVG.
+    /// let validator = FileValidator::new().images_only().allow_svg_unsanitized();
+    /// # let _ = validator;
+    /// ```
+    pub fn allow_svg_unsanitized(mut self) -> Self {
+        self.allow_svg = true;
+        self
     }
 
     /// Only allow documents.
@@ -304,7 +351,8 @@ impl FileValidator {
     pub fn validate(&self, file: &UploadedFile) -> Result<(), ValidationError> {
         // Sniff the payload once and hand the result to every rule, rather
         // than letting each content-inspecting rule re-scan the whole file.
-        let context = ValidationContext::for_file(file);
+        let mut context = ValidationContext::for_file(file);
+        context.svg_allowed = self.allow_svg;
         let mut errors = Vec::new();
 
         for rule in &self.rules {
@@ -374,20 +422,91 @@ impl ValidationRule for MinSizeRule {
 /// bytes at all. A `Some` result reflects the *actual* bytes, unlike the
 /// client-declared `Content-Type` carried on a multipart part header.
 pub fn sniff_content_type(data: &[u8]) -> Option<String> {
-    if let Some(kind) = infer::get(data) {
-        return Some(kind.mime_type().to_string());
+    // `infer` is magic-byte based and so cannot see SVG, which is XML text
+    // (an SVG with an XML declaration would sniff as plain `text/xml`).
+    // Recognize it structurally first, so an SVG declared as something else
+    // is caught by the content-mismatch and SVG checks.
+    if is_svg_document(data) {
+        return Some(SVG_MIME.to_string());
     }
 
-    // `infer` is magic-byte based and so cannot see SVG, which is XML text.
-    // Recognize it explicitly since `images_only()` allows it.
-    let head = &data[..data.len().min(1024)];
-    let head = String::from_utf8_lossy(head);
-    let trimmed = head.trim_start();
-    if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && head.contains("<svg")) {
-        return Some("image/svg+xml".to_string());
+    infer::get(data).map(|kind| kind.mime_type().to_string())
+}
+
+/// The SVG media type.
+const SVG_MIME: &str = "image/svg+xml";
+
+/// How far into a payload [`is_svg_document`] looks for the root element.
+const SVG_SNIFF_LIMIT: usize = 4096;
+
+/// Whether `mime` names SVG, including the non-standard `image/svg` alias and
+/// any parameters (`image/svg+xml; charset=utf-8`).
+fn is_svg_mime(mime: &str) -> bool {
+    let essence = mime.split(';').next().unwrap_or("").trim();
+    essence.eq_ignore_ascii_case(SVG_MIME) || essence.eq_ignore_ascii_case("image/svg")
+}
+
+/// Whether `data` is an XML document whose **root element** is `<svg>`.
+///
+/// Skips a UTF-8 BOM, whitespace, the XML declaration, processing
+/// instructions, comments and a `DOCTYPE`, then requires the first element to
+/// be `svg` (optionally namespace-prefixed). This is deliberately structural:
+/// an XHTML page that merely *contains* an inline `<svg>` is not an SVG
+/// document, and `<svgfoo>` is not `<svg>`.
+fn is_svg_document(data: &[u8]) -> bool {
+    let mut rest = &data[..data.len().min(SVG_SNIFF_LIMIT)];
+    rest = rest.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(rest);
+
+    loop {
+        rest = rest.trim_ascii_start();
+        if let Some(after) = rest.strip_prefix(b"<?") {
+            // XML declaration or processing instruction.
+            match find(after, b"?>") {
+                Some(end) => rest = &after[end + 2..],
+                None => return false,
+            }
+        } else if let Some(after) = rest.strip_prefix(b"<!--") {
+            match find(after, b"-->") {
+                Some(end) => rest = &after[end + 3..],
+                None => return false,
+            }
+        } else if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case(b"<!DOCTYPE") {
+            // A DOCTYPE may hold an internal subset in `[...]`.
+            let after = &rest[9..];
+            let end = match (find(after, b"["), find(after, b">")) {
+                (Some(open), Some(gt)) if open < gt => {
+                    find(&after[open..], b"]>").map(|close| open + close + 1)
+                }
+                (_, gt) => gt,
+            };
+            match end {
+                Some(end) => rest = &after[end + 1..],
+                None => return false,
+            }
+        } else {
+            break;
+        }
     }
 
-    None
+    let Some(after) = rest.strip_prefix(b"<") else {
+        return false;
+    };
+    let name_len = after
+        .iter()
+        .position(|b| b.is_ascii_whitespace() || matches!(b, b'>' | b'/'))
+        .unwrap_or(after.len());
+    let name = &after[..name_len];
+    // Allow a namespace prefix such as `<svg:svg>`.
+    let local = match name.iter().rposition(|&b| b == b':') {
+        Some(colon) => &name[colon + 1..],
+        None => name,
+    };
+    local.eq_ignore_ascii_case(b"svg") && name_len < after.len()
+}
+
+/// Byte-substring search.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Whether a client-declared MIME type is consistent with one sniffed from the
@@ -489,7 +608,29 @@ impl AllowedTypesRule {
         }
     }
 
-    fn check(&self, file: &UploadedFile, detected: Option<&str>) -> Result<(), ValidationError> {
+    fn check(
+        &self,
+        file: &UploadedFile,
+        detected: Option<&str>,
+        svg_allowed: bool,
+    ) -> Result<(), ValidationError> {
+        // SVG is an active document (stored XSS when served inline), so it is
+        // refused by every allowlist -- including `image/*` and an explicit
+        // entry -- unless the validator opted in with `allow_svg_unsanitized`.
+        if !svg_allowed {
+            for mime in [
+                file.content_type().map(|m| m.to_string()),
+                detected.map(str::to_string),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if is_svg_mime(&mime) {
+                    return Err(ValidationError::TypeNotAllowed { mime_type: mime });
+                }
+            }
+        }
+
         // 1. The declared type must be present and allowed. Fail closed when
         //    the client declared nothing.
         let declared = match file.content_type() {
@@ -538,7 +679,7 @@ impl ValidationRule for AllowedTypesRule {
     /// Standalone entry point: sniffs the payload itself, for callers driving
     /// the rule directly rather than through [`FileValidator::validate`].
     fn validate(&self, file: &UploadedFile) -> Result<(), ValidationError> {
-        self.check(file, sniff_content_type(file.data()).as_deref())
+        self.check(file, sniff_content_type(file.data()).as_deref(), false)
     }
 
     fn validate_with(
@@ -546,7 +687,7 @@ impl ValidationRule for AllowedTypesRule {
         file: &UploadedFile,
         context: &ValidationContext,
     ) -> Result<(), ValidationError> {
-        self.check(file, context.detected_content_type())
+        self.check(file, context.detected_content_type(), context.svg_allowed())
     }
 
     fn description(&self) -> &str {
@@ -750,10 +891,71 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{name} should validate, got {e:?}"));
         }
 
-        // SVG has no magic bytes; it is recognized structurally.
-        validator
+        // SVG is an active document (stored XSS); images_only refuses it.
+        let err = validator
             .validate(&file(SVG, "a.svg"))
-            .expect("svg should validate");
+            .expect_err("images_only must reject svg");
+        assert!(matches!(err.kind(), ValidationError::TypeNotAllowed { .. }));
+    }
+
+    #[test]
+    fn allow_svg_unsanitized_opts_in_to_svg() {
+        FileValidator::new()
+            .images_only()
+            .allow_svg_unsanitized()
+            .validate(&file(SVG, "a.svg"))
+            .expect("svg should validate once explicitly allowed");
+    }
+
+    #[test]
+    fn svg_is_rejected_even_by_wildcard_or_explicit_allowlists() {
+        for types in [&["image/*"][..], &["image/svg+xml"][..]] {
+            let err = FileValidator::new()
+                .allowed_types(types)
+                .validate(&file(SVG, "a.svg"))
+                .expect_err("svg must need allow_svg_unsanitized");
+            assert!(matches!(err.kind(), ValidationError::TypeNotAllowed { .. }));
+        }
+    }
+
+    #[test]
+    fn svg_disguised_as_text_is_rejected() {
+        let payload: &'static [u8] =
+            b"<?xml version=\"1.0\"?>\n<!-- hi -->\n<!DOCTYPE svg [ <!ENTITY a \"b\"> ]>\n<svg onload=\"alert(1)\"/>";
+        let err = FileValidator::new()
+            .documents_only()
+            .validate(&file(payload, "notes.txt"))
+            .expect_err("an svg declared as text/plain must be rejected");
+        assert!(matches!(
+            err.kind(),
+            ValidationError::TypeNotAllowed { .. } | ValidationError::ContentMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn svg_sniffing_is_structural() {
+        assert_eq!(
+            sniff_content_type(b"\xEF\xBB\xBF  <svg:svg xmlns:svg=\"x\">").as_deref(),
+            Some("image/svg+xml")
+        );
+        assert_eq!(
+            sniff_content_type(b"<SVG>").as_deref(),
+            Some("image/svg+xml")
+        );
+        // An XHTML page that merely contains an inline svg is not an SVG.
+        assert_ne!(
+            sniff_content_type(b"<?xml version=\"1.0\"?><html><body><svg/></body></html>")
+                .as_deref(),
+            Some("image/svg+xml")
+        );
+        // An SVG with an XML declaration is still an SVG (not `text/xml`).
+        assert_eq!(
+            sniff_content_type(b"<?xml version=\"1.0\"?>\n<svg/>").as_deref(),
+            Some("image/svg+xml")
+        );
+        assert_eq!(sniff_content_type(b"<svgfoo>"), None);
+        assert_eq!(sniff_content_type(b"<svg"), None);
+        assert_eq!(sniff_content_type(b"hello <svg>"), None);
     }
 
     #[test]

@@ -9,6 +9,16 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Security
+
+- **Breaking:** `FileValidator::images_only()` no longer accepts SVG. SVG is an active document (`<script>`, `onload=`, `<foreignObject>`), so serving an uploaded one inline from your origin is stored XSS. SVG is now refused by *every* type allowlist -- including `image/*` and an explicit `image/svg+xml` entry -- unless the validator opts in with the new `FileValidator::allow_svg_unsanitized()`, whose docs spell out the required serving precautions (separate origin, `Content-Disposition: attachment`, `Content-Security-Policy: sandbox`, `nosniff`). Migration: add `.allow_svg_unsanitized()` only if you sanitize SVGs or never serve them inline.
+- SVG sniffing is structural: the root element (after a BOM, XML declaration, comments, processing instructions and `DOCTYPE`) must be `<svg>`. An SVG with an XML declaration is now detected as `image/svg+xml` (it previously sniffed as `text/xml`), and an XHTML page that merely contains an inline `<svg>` no longer counts as SVG.
+- The GCS signed-URL tests no longer embed a private key in `src/gcs.rs` (it shipped in the published crate); a throwaway RSA key is generated at test time instead.
+
+### Added
+
+- `FileValidator::allow_svg_unsanitized()` and `ValidationContext::svg_allowed()`.
+
 ## [0.3.0] - 2026-09-15
 
 ### Changed

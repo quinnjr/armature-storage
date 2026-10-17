@@ -640,10 +640,31 @@ mod tests {
         );
     }
 
-    /// A throwaway RSA key used purely to build a deterministic signer, so the
-    /// signed-URL assertions below do not depend on Application Default
-    /// Credentials being present. It signs nothing real.
-    const TEST_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDiKQN8zuLbaZN5\nMTPXXDvl/GsAknmPwNtgr6F1EzH/HntrdtZ+lvYzjFtvZ/+tjmjr2w/lcptxZKKk\n21VEZm8pN9YPCQqDuZVEzlhy8JnQ9C3eyNrTOCue1qWz31xCkwn4rDHtVasEIajm\noTThz9xMB7Gf2IgPgDMbhCkFBd35EBbzlGUhXQG/Ke1C0juKV6JT32AwAxVyr3rL\nRJ55zMBLaoJAKbQBmnfWJqiHWsMb+WYffwDTDs4xR2niMJrwaNhDutRTts9k6GnY\nlDl6ra9ZV0spHfnLXvWpskTFSnCFGMJ7fBI+sM4jPO/WvayzW6eaC7j+foJpKE4M\n4xQrTrkFAgMBAAECggEAT82kHubL8xtyf+nGPsCbnEBxK38EKR8m6hufT/YJhtnl\nOBrzfjDbyH3HB+09MatWR5+BoPfLdPxLTfvdPykcIYHD5YNNtASI8QIVAN34kNyQ\n0ROz76Na9Q4N44Y2AoHrG1X7uiEoGumbtWH+DI5x0FxIp7xa6olUv2lnpg+Xb5o9\ngBQrcnMDc8cyC4ObV3dz/KOQ7z1Hr0KT3GVzQmH+IGubhI1Q5R6NC6esEDvlG8l5\n8bgK5MXRi5peIsNodT2ZZAI1VzjAd+AiMme+lGz9xMrhm0F2V0NvF8EpSo4uas5M\nUUJrFa9BMBSK60MPPgEPpli70doxOm9pNOc+zHugwwKBgQD0+wJdbZTn0bUtHoOv\nYdpClGLbSolKA1l7a9CU/BpMCGTfS8yPXM4ohzRDNixdvJlLlF4FIOztKLiIWJ3D\nYFrPwfN1I6qea3EsIf/mK9qmB+Z8KpPZBUEzw//YphJvjq/LbTFz5aoEkJgiLpGV\n9F8aW98myVZPkbVmmL1DW6i22wKBgQDsVUkci7sP1uvfH+CL00OLcL04/zM8MZyw\nfl+7oFJEPEWxp146hNKphAq21n4XRBTQWCxzU39x6GUmXpDoakntGhWwPNld34Q5\ntJZidf1FnnVv3Mq0N/rC13awHgHENdmYgYzO2CxSXfV8viE+5uErFf8o9sK61HmZ\nk/2+1h6lnwKBgQDLVMc6umg8HM+umkQcPjCE0FpYvr3Cg5MyoGLoNXKyJslqmKQ5\nXYLzGn0jSAR87Lujgoqi4RglI4Y+DKcs8X2OMOGcGTVU9cJiKfoWldGNusLvzfsW\nxoi+qXBh5j0pAJoiUwgXtMhvr3/F5zcI6mJBI33M2JFdy4dvl1iHXr1ivwKBgDLh\n0dHhi67HWRU66b9xBtPYvASvfTpyfAfLzZS52bxzNZYgMLtsqWZx1VS0LYWY1Npe\ngYN68K93l3+BULWZXL09pnnBQBNj8jXyWYZtXNBGY4ZoBQR0IPseJKGadEroRSb+\njXBjPnelXxsyXDoMv2HlZIBPUHGlGWElabZSp1qFAoGBANdzGUXT1ozW48YcP4Iq\nCXpr8pOpxGOup3Ts8OcmLFgbXcT3SkmiwlD02TmrDYQIWtT7ZQoAx38Xk6f29cUn\niGeE9ycRZfgR8BJneYielQ/y5d/A9KmpORr1BuQCf0JMnJB8veC/NDIoNDFpVPIq\nr1cMH1jgia8+TqcycOHM1e43\n-----END PRIVATE KEY-----\n";
+    /// A throwaway RSA key, generated once per test run, used purely to build
+    /// a deterministic signer so the signed-URL assertions below do not depend
+    /// on Application Default Credentials being present. Generating it here
+    /// (rather than committing a PEM) means no private key ships in the crate.
+    fn test_private_key_pem() -> &'static str {
+        use aws_lc_rs::encoding::AsDer;
+        use base64::Engine as _;
+        use std::sync::OnceLock;
+
+        static PEM: OnceLock<String> = OnceLock::new();
+        PEM.get_or_init(|| {
+            let key = aws_lc_rs::rsa::KeyPair::generate(aws_lc_rs::rsa::KeySize::Rsa2048)
+                .expect("generating a test RSA key should succeed");
+            let der = AsDer::<aws_lc_rs::encoding::Pkcs8V1Der>::as_der(&key)
+                .expect("encoding the test RSA key as PKCS#8 should succeed");
+            let b64 = base64::engine::general_purpose::STANDARD.encode(der.as_ref());
+            let mut pem = String::from("-----BEGIN PRIVATE KEY-----\n");
+            for line in b64.as_bytes().chunks(64) {
+                pem.push_str(std::str::from_utf8(line).expect("base64 is ascii"));
+                pem.push('\n');
+            }
+            pem.push_str("-----END PRIVATE KEY-----\n");
+            pem
+        })
+    }
 
     fn test_signer() -> google_cloud_auth::signer::Signer {
         use google_cloud_auth::credentials::service_account::Builder as ServiceAccountBuilder;
@@ -652,7 +673,7 @@ mod tests {
             "type": "service_account",
             "project_id": "test-project",
             "private_key_id": "test-key-id",
-            "private_key": TEST_PRIVATE_KEY,
+            "private_key": test_private_key_pem(),
             "client_email": "test@test-project.iam.gserviceaccount.com",
             "client_id": "1234567890",
             "universe_domain": "googleapis.com",
