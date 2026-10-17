@@ -84,6 +84,10 @@ armature-testkit = { path = "../armature-testkit" }
 tempfile = "3.27"
 serde_json = "1.0"
 futures = "0.3"
+# Test-only: generates the throwaway RSA key the GCS signed-URL tests sign
+# with, so no private key is committed. Already in the tree via google-cloud-auth.
+aws-lc-rs = "1.18"
+base64 = "0.23"
 
 [features]
 default = []
