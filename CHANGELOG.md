@@ -9,6 +9,8 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Security
 
 - **Breaking:** `FileValidator::images_only()` no longer accepts SVG. SVG is an active document (`<script>`, `onload=`, `<foreignObject>`), so serving an uploaded one inline from your origin is stored XSS. SVG is now refused by *every* type allowlist -- including `image/*` and an explicit `image/svg+xml` entry -- unless the validator opts in with the new `FileValidator::allow_svg_unsanitized()`, whose docs spell out the required serving precautions (separate origin, `Content-Disposition: attachment`, `Content-Security-Policy: sandbox`, `nosniff`). Migration: add `.allow_svg_unsanitized()` only if you sanitize SVGs or never serve them inline.
